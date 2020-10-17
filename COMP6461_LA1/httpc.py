@@ -7,9 +7,11 @@
 #   python3 httpc.py get -v 'http://google.com'
 
 import argparse
+import sys
 from urllib.parse import urlparse
 
-from http_protocol import http
+sys.path.append('..')
+from COMP6461_LA1.http_protocol import http
 
 version = "1.0"
 user_agent_name = "httpc"
@@ -27,7 +29,7 @@ class httpc:
 
         http_client.set_server = url.netloc
         http_client.set_path = url.path
-        http_client.set_port = 80
+        http_client.set_port = args.port
         http_client.set_request_headers = {"Host": http_client.server}
         http_client.set_request_headers = {"User-Agent": self.user_agent}
         http_client.set_request_type = args.request_type
@@ -88,6 +90,13 @@ get_parser.add_argument("-o",
                         help="Output body HTTP GET request to file",
                         default="")
 
+get_parser.add_argument("-p",
+                        dest="port",
+                        type=int,
+                        help="Specify port number of server for connection.",
+                        action="store",
+                        default="8080")
+
 get_parser.add_argument("URL", help="HTTP URL")
 get_parser.set_defaults(request_type="get")
 
@@ -115,6 +124,13 @@ post_parser.add_argument("-o",
                          action="store",
                          help="Output body HTTP POST request to file",
                          default="")
+
+post_parser.add_argument("-p",
+                         dest="port",
+                         type=int,
+                         help="Specify port number of server for connection.",
+                         action="store",
+                         default="8080")
 
 post_parser.add_argument("URL", help="HTTP URL")
 

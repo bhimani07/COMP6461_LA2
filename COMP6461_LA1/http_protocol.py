@@ -1,8 +1,10 @@
 import socket
+import sys
 from http.client import HTTPResponse
 from io import BytesIO
 from urllib.parse import urlparse
 
+sys.path.append('..')
 from bgcolor import BgColor
 
 
@@ -196,7 +198,7 @@ class http:
                 url = urlparse(url)
                 self.set_server = url.netloc
                 self.set_path = url.path
-                self.set_port = 80
+                self.set_port = url.port
 
                 self.send_http_request()
             except AttributeError as error:

@@ -1,7 +1,8 @@
 import argparse
 import socket
+import traceback
 from http.server import BaseHTTPRequestHandler
-from io import StringIO
+from io import BytesIO
 
 
 class response_code(enumerate):
@@ -11,28 +12,45 @@ class response_code(enumerate):
     UNAUTHORIZED = 401
 
 
+class logger(enumerate):
+    DEBUG = "DEBUG"
+    ERROR = "ERROR"
+
+
 class server:
     debugging = None
     port = None
     directory = None
 
-    def configure_and_start_server(self):
-        server.port = args.port
-        server.debugging = args.debugging
-        server.directory = args.directory
-        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcp_socket.bind(('localhost', self.port))
-        tcp_socket.listen(5)
+    def __init__(self, debugging, port, directory):
+        server.debugging = debugging
+        server.port = port
+        server.directory = directory
 
+    def configure_and_start_server(self):
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            tcp_socket.bind(('localhost', server.port))
+            tcp_socket.listen(10)
+        except socket.error as error:
+            print("Socket Error : ", error)
+            exit()
         while True:
-            connection, client_address = tcp_socket.accept()
-            self.print_if_debugging_is_enabled("client connected from ", str(client_address))
-            httpfs().handle_client_request(connection, client_address)
+            try:
+                connection, client_address = tcp_socket.accept()
+                self.print_if_debugging_is_enabled(logger.DEBUG, "client connected from " + str(client_address))
+                httpfs().handle_client_request(connection, client_address)
+            except (KeyboardInterrupt, Exception) as e:
+                print("Error: " + traceback.format_exc())
+                break
+        tcp_socket.close()
 
     @staticmethod
-    def print_if_debugging_is_enabled(message):
-        if server.debugging:
-            print("debug: " + message)
+    def print_if_debugging_is_enabled(type, message):
+        if type is logger.DEBUG:
+            print("DEBUG: " + message)
+        elif type is logger.ERROR:
+            print("ERROR: " + message)
 
 
 class httpfs:
@@ -70,7 +88,14 @@ class httpfs:
 
     @request_headers.setter
     def set_request_headers(self, request_headers):
-        self._request_headers = request_headers
+        self._request_headers.update(request_headers)
+
+    @property
+    def get_request_header_as_string(self):
+        header = ""
+        for key, val in self.request_headers.items():
+            header = header + (key + ": " + val + "\n")
+        return header
 
     @property
     def request_query_parameters(self):
@@ -115,12 +140,11 @@ class httpfs:
     def handle_client_request(self, connection, client_address):
         while True:
             request = connection.recv(4096)
-            request = request.decode('utf-8')
             self.parse_request(request)
 
     """
         For HTTP Request Parsing 
-        see (https://stackoverflow.com/questions/2115410/does-python-have-a-module-for-parsing-http-requests-and-responses)
+        see (https://stackoverflow.com/a/5955949/14375140)
     """
 
     def parse_request(self, request):
@@ -128,22 +152,36 @@ class httpfs:
         if not request.error_code:
             self.set_request_type = request.command  # "GET"
             self.set_request_path = request.path  # "/who/ken/trust.html"
-            self.set_response_headers = request.headers
+            self.set_request_headers = request.headers
         else:
             self._response_code = response_code.BAD_REQUEST
             self._response_body = "Invalid Request Format"
-            server.print_if_debugging_is_enabled("Invalid Request Format: " + request.error_code)
-            self.send_response()
+            server.print_if_debugging_is_enabled(logger.ERROR, "Invalid Request Format: " + request.error_code)
+            # self.send_response()
             raise SyntaxError("Invalid Request Format: " + request.error_code)
 
+    def generate_response(self):
+        if self._request_path.contains(".."):
+            self.set_response_code = response_code.UNAUTHORIZED
+            self.set_response_body = "Access denied"
+            server.print_if_debugging_is_enabled(logger.ERROR, "Access denied at path: " + self._request_path)
+        else:
+            if self._request_type == "GET":
+                # TODO: parse GET request
+                return ""
+
+            elif self._request_type == "POST":
+                # TODO: parse POST request
+                return ""
+
     def send_response(self):
-        # TODO: check for the request type and accordingly send the response to client.
+        # TODO: send the response to client through TCP socket.
         return ""
 
 
 class HTTPRequest(BaseHTTPRequestHandler):
     def __init__(self, request_text):
-        self.rfile = StringIO(request_text)
+        self.rfile = BytesIO(request_text)
         self.raw_requestline = self.rfile.readline()
         self.error_code = self.error_message = None
         self.parse_request()
@@ -159,14 +197,14 @@ parser.add_argument("-v", dest="debugging",
                     help="Prints debugging messages if enabled",
                     action="store_true")
 parser.add_argument("-p",
-                    dest="PORT",
+                    dest="port",
                     default="8080",
                     type=int,
                     help="Specifies the port number that the server will listen and serve at \
                             Default is 8080.",
                     action="store")
 parser.add_argument("-d",
-                    dest="DIRECTORY",
+                    dest="directory",
                     help="Specifies the directory that the server will use to read/write requested files. Default is "
                          "the current directory when launching the application.",
                     default="./")
@@ -175,3 +213,5 @@ parser.add_argument("-d",
 # print("Parent of current directory: " + os.path.abspath(os.path.join(os.getcwd(), os.pardir)))
 
 args = parser.parse_args()
+server_instance = server(args.debugging, args.port, args.directory)
+server_instance.configure_and_start_server()
