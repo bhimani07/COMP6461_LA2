@@ -1,15 +1,26 @@
 import argparse
+import json
+import mimetypes
+import os
 import socket
+import sys
+import threading
 import traceback
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
+
+from lockfile import LockFile
+
+from bgcolor import BgColor
 
 
 class response_code(enumerate):
     NOT_FOUND = 404
-    OKAY = 200
+    OK = 200
     BAD_REQUEST = 400
     UNAUTHORIZED = 401
+    INTERNAL_SERVER_ERROR = 500
 
 
 class logger(enumerate):
@@ -32,39 +43,58 @@ class server:
         try:
             tcp_socket.bind(('localhost', server.port))
             tcp_socket.listen(10)
-        except socket.error as error:
-            print("Socket Error : ", error)
-            exit()
+        except socket.error:
+            print("Socket Error : ", traceback.format_exc())
         while True:
             try:
                 connection, client_address = tcp_socket.accept()
+                print("\n")
                 self.print_if_debugging_is_enabled(logger.DEBUG, "client connected from " + str(client_address))
-                httpfs().handle_client_request(connection, client_address)
-            except (KeyboardInterrupt, Exception) as e:
-                print("Error: " + traceback.format_exc())
+                threading.Thread(target=httpfs().handle_client_request, args=(connection, client_address)).start()
+            except (KeyboardInterrupt, Exception):
+                server.print_if_debugging_is_enabled(logger.ERROR, traceback.format_exc())
                 break
         tcp_socket.close()
 
     @staticmethod
     def print_if_debugging_is_enabled(type, message):
         if type is logger.DEBUG:
-            print("DEBUG: " + message)
+            print(BgColor.color_yellow_wrapper("DEBUG: " + message))
         elif type is logger.ERROR:
-            print("ERROR: " + message)
+            print(BgColor.color_magenta_wrapper("ERROR: " + message))
 
 
 class httpfs:
 
     def __init__(self):
+        self._connection = None
+        self._client_address = None
+
         self._request_type = None
         self._request_path = None
         self._request_headers = {}
         self._request_query_parameters = None
         self._request_body = None
 
-        self._response_code = None
+        self._response_status = {}
         self._response_headers = {}
         self._response_body = None
+
+    @property
+    def connection(self):
+        return self._connection
+
+    @connection.setter
+    def set_connection(self, connection):
+        self._connection = connection
+
+    @property
+    def client_address(self):
+        return self._client_address
+
+    @client_address.setter
+    def set_client_address(self, client_address):
+        self._client_address = client_address
 
     @property
     def request_type(self):
@@ -114,12 +144,12 @@ class httpfs:
         self._request_body = request_body
 
     @property
-    def response_code(self):
-        return self._response_code
+    def response_status(self):
+        return self._response_status
 
-    @response_code.setter
-    def set_response_code(self, response_code):
-        self._response_code = response_code
+    @response_status.setter
+    def set_response_status(self, response_status):
+        self._response_status = response_status
 
     @property
     def response_headers(self):
@@ -127,20 +157,44 @@ class httpfs:
 
     @response_headers.setter
     def set_response_headers(self, response_headers):
-        self._response_headers = response_headers
+        self._response_headers.update(response_headers)
+
+    @property
+    def get_response_header_as_string(self):
+        header = ""
+        for key, val in self.response_headers.items():
+            header = header + (key + ": " + str(val) + "\r\n")
+        return header
 
     @property
     def response_body(self):
         return self._response_body
 
     @response_body.setter
-    def response_body(self, response_body):
+    def set_response_body(self, response_body):
         self._response_body = response_body
 
+    def get_byte_length_of_object(self, object):
+        return sys.getsizeof(object.encode("utf-8"))
+
     def handle_client_request(self, connection, client_address):
-        while True:
-            request = connection.recv(4096)
-            self.parse_request(request)
+        try:
+            self.set_connection = connection
+            self.set_client_address = str(client_address)
+            while True:
+                request = connection.recv(8192)
+                if len(request) > 0:
+                    self.parse_request(request)
+                    self.generate_response()
+                    self.send_response()
+                break
+        except Exception as e:
+            if not self.response_status:
+                self.set_response_status = {"Internal Server Error": response_code.INTERNAL_SERVER_ERROR}
+                self.set_response_body = json.dumps({"Message: ": "Internal Server Error " + self.request_path})
+                self.set_response_headers = {"Content-Type": "application/json"}
+                self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+            self.send_response()
 
     """
         For HTTP Request Parsing 
@@ -149,34 +203,115 @@ class httpfs:
 
     def parse_request(self, request):
         request = HTTPRequest(request)
+        server.print_if_debugging_is_enabled(logger.DEBUG, "Received Request from client: " + self.client_address)
         if not request.error_code:
-            self.set_request_type = request.command  # "GET"
-            self.set_request_path = request.path  # "/who/ken/trust.html"
+            self.set_request_type = request.command
             self.set_request_headers = request.headers
+            self.set_request_path = request.path
+            content_length = self.request_headers.get('Content-Length')
+            if content_length:
+                self.set_request_body = request.rfile.read(int(content_length)).decode("utf-8")
+            server.print_if_debugging_is_enabled(logger.DEBUG,
+                                                 "Parsing " + self.request_type + " request from client: " + self.client_address)
         else:
-            self._response_code = response_code.BAD_REQUEST
-            self._response_body = "Invalid Request Format"
-            server.print_if_debugging_is_enabled(logger.ERROR, "Invalid Request Format: " + request.error_code)
-            # self.send_response()
-            raise SyntaxError("Invalid Request Format: " + request.error_code)
+            self.set_request_type = request.command
+            self.set_response_status = {"Bad Request": response_code.BAD_REQUEST}
+            self.set_response_body = json.dumps("Invalid Request Format")
+            self.set_response_headers = {"Content-Type": "application/json"}
+            self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+            server.print_if_debugging_is_enabled(logger.DEBUG, "Bad Request: Invalid Request Format"
+                                                 + str(request.error_code) + "From" + self.client_address)
+            raise SyntaxError("Invalid Request Format: " + str(request.error_code))
 
     def generate_response(self):
-        if self._request_path.contains(".."):
-            self.set_response_code = response_code.UNAUTHORIZED
-            self.set_response_body = "Access denied"
-            server.print_if_debugging_is_enabled(logger.ERROR, "Access denied at path: " + self._request_path)
+        if ".." in self.request_path:
+            self.set_response_status = {"Unauthorized": response_code.UNAUTHORIZED}
+            self.set_response_body = json.dumps("Access denied")
+            self.set_response_headers = {"Content-Type": "application/json"}
+            self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+            server.print_if_debugging_is_enabled(logger.DEBUG,
+                                                 "Access denied at path: " + server.directory + self.request_path +
+                                                 " for client: " + self.client_address)
         else:
-            if self._request_type == "GET":
-                # TODO: parse GET request
-                return ""
+            if self.request_type == "GET":
+                if self.request_path == "/":
+                    list_of_files = os.listdir(server.directory)
+                    self.set_response_status = {"OK": response_code.OK}
+                    self.set_response_body = json.dumps({"list": list_of_files})
+                    self.set_response_headers = {"Content-Type": "application/json"}
+                    self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+                elif os.path.exists(server.directory + self.request_path):
+                    with open(server.directory + self.request_path) as f:
+                        file_content = f.read()
+                        mime_type = mimetypes.guess_type(self.request_path)
+                        self.set_response_status = {"OK": response_code.OK}
+                        self.set_response_body = file_content
+                        self.set_response_headers = {"Content-Type": mime_type[0]}
+                        self.set_response_headers = {
+                            "Content-Length": self.get_byte_length_of_object(self.response_body)}
+                else:
+                    self.set_response_status = {"Not Found": response_code.NOT_FOUND}
+                    self.set_response_body = json.dumps({"message: ": "requested file does not exist or invalid path"})
+                    self.set_response_headers = {"Content-Type": "application/json"}
+                    self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+                    server.print_if_debugging_is_enabled(logger.DEBUG,
+                                                         "requested file does not exist or invalid path at " + self._request_path + " for client: " + self.client_address)
 
-            elif self._request_type == "POST":
-                # TODO: parse POST request
-                return ""
+            elif self.request_type == "POST":
+                # If there is any /post attached to path it will be pre processed and path will be built from it.
+                self.set_request_path = self.request_path.replace("/post", "", 1)
+                if not os.path.exists(server.directory + self.request_path):
+                    try:
+                        os.makedirs(os.path.dirname(server.directory + self.request_path))
+                    except OSError as e:
+                        server.print_if_debugging_is_enabled(logger.DEBUG,
+                                                             "Can't create desired file at " +
+                                                             self.request_path
+                                                             + self.client_address)
+
+                if os.path.isdir(server.directory + self.request_path):
+                    self.set_response_status = {"Bad Request": response_code.BAD_REQUEST}
+                    self.set_response_body = json.dumps({"Message: ": "requested path is directory"})
+                    self.set_response_headers = {"Content-Type": "application/json"}
+                    self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+                    server.print_if_debugging_is_enabled(logger.DEBUG,
+                                                         "requested path is Directory for client " + self.client_address)
+                    raise IsADirectoryError(self)
+
+                if self.request_body:
+                    lock = LockFile(server.directory + self.request_path)
+                    lock.acquire()
+                    file = open(server.directory + self.request_path, "w")
+                    file.write(self.request_body)
+                    file.close()
+                    lock.release()
+                    self.set_response_status = {"OK": response_code.OK}
+                    self.set_response_body = json.dumps({"Success: ": "true"})
+                    self.set_response_headers = {"Content-Type": "application/json"}
+                    self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
+                else:
+                    self.set_response_status = {"OK": response_code.OK}
+                    self.set_response_body = json.dumps({"Message: ": "No Content to Write"})
+                    self.set_response_headers = {"Content-Type": "application/json"}
+                    self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
 
     def send_response(self):
-        # TODO: send the response to client through TCP socket.
-        return ""
+        response_status = list(self.response_status.keys())[0]
+        response_code = str(self.response_status[response_status])
+        date = str(formatdate(timeval=None, localtime=False, usegmt=True))
+
+        server.print_if_debugging_is_enabled(logger.DEBUG,
+                                             "sending response of " + self.request_type + " request with status " +
+                                             response_code + " at time: "
+                                             + date + " to client: " + self.client_address)
+
+        response_headers = "HTTP/1.0 " + response_code + " " + response_status + "\r\n" + \
+                           "Date: " + date + "\r\n" + \
+                           "Server: " + "COMP6461_LA1 (Unix)" + "\r\n" + \
+                           self.get_response_header_as_string + "\r\n"
+
+        self.connection.sendall(response_headers.encode('utf-8'))
+        self.connection.sendall(self.response_body.encode('utf-8'))
 
 
 class HTTPRequest(BaseHTTPRequestHandler):
@@ -207,10 +342,7 @@ parser.add_argument("-d",
                     dest="directory",
                     help="Specifies the directory that the server will use to read/write requested files. Default is "
                          "the current directory when launching the application.",
-                    default="./")
-#
-# print("current directory: " + os.getcwd())
-# print("Parent of current directory: " + os.path.abspath(os.path.join(os.getcwd(), os.pardir)))
+                    default=os.getcwd())
 
 args = parser.parse_args()
 server_instance = server(args.debugging, args.port, args.directory)

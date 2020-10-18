@@ -8,7 +8,7 @@ sys.path.append('..')
 from bgcolor import BgColor
 
 
-def createTCPSocket(timeout):
+def createTCPSocket(timeout=None):
     tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if timeout:
         tcp_socket.settimeout(timeout)
@@ -158,7 +158,7 @@ class http:
             tcp_socket = createTCPSocket(10)
             tcp_socket.connect((self.server, self.port))
             tcp_socket.sendall(self.request.encode("utf-8"))
-            server_response = tcp_socket.recv(4096, socket.MSG_WAITALL)
+            server_response = tcp_socket.recv(8192)
             self.parse_response_and_display_results(server_response.decode("utf-8"))
         except socket.timeout as timeoutError:
             print("Socket Timeout : ", timeoutError)
@@ -166,10 +166,14 @@ class http:
             print("Socket Error : ", error)
 
     def generate_request(self):
-        self.set_request = self.request_type.upper() + " " + self.path + \
-                           "?" + self.request_query_parameters + " " + self.HTTP_PROTOCOL + " \n" + \
-                           self.get_request_header_as_string + "\n"
+        if self.request_query_parameters:
+            self.set_request_query_parameters = "?" + self.request_query_parameters
+        else:
+            self.set_request_query_parameters = ""
 
+        self.set_request = self.request_type.upper() + " " + self.path + \
+                           self.request_query_parameters + " " + self.HTTP_PROTOCOL + " \n" + \
+                           self.get_request_header_as_string + "\n"
         if self.request_type == "post":
             if self.request_body:
                 self.set_request = self.request + self.request_body
