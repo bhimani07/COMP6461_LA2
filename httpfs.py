@@ -48,20 +48,22 @@ class server:
         while True:
             try:
                 connection, client_address = tcp_socket.accept()
-                print("\n")
+                self.print_if_debugging_is_enabled(None, "\n")
                 self.print_if_debugging_is_enabled(logger.DEBUG, "client connected from " + str(client_address))
                 threading.Thread(target=httpfs().handle_client_request, args=(connection, client_address)).start()
             except (KeyboardInterrupt, Exception):
                 server.print_if_debugging_is_enabled(logger.ERROR, traceback.format_exc())
                 break
-        tcp_socket.close()
 
     @staticmethod
     def print_if_debugging_is_enabled(type, message):
-        if type is logger.DEBUG:
-            print(BgColor.color_yellow_wrapper("DEBUG: " + message))
-        elif type is logger.ERROR:
-            print(BgColor.color_magenta_wrapper("ERROR: " + message))
+        if args.debugging:
+            if type is logger.DEBUG:
+                print(BgColor.color_yellow_wrapper("DEBUG: " + message))
+            elif type is logger.ERROR:
+                print(BgColor.color_red_wrapper("ERROR: " + message))
+            elif type is None:
+                print(message)
 
 
 class httpfs:
@@ -195,6 +197,7 @@ class httpfs:
                 self.set_response_headers = {"Content-Type": "application/json"}
                 self.set_response_headers = {"Content-Length": self.get_byte_length_of_object(self.response_body)}
             self.send_response()
+            server.print_if_debugging_is_enabled(logger.ERROR, traceback.format_exc())
 
     """
         For HTTP Request Parsing 
@@ -258,16 +261,15 @@ class httpfs:
                                                          "requested file does not exist or invalid path at " + self._request_path + " for client: " + self.client_address)
 
             elif self.request_type == "POST":
-                # If there is any /post attached to path it will be pre processed and path will be built from it.
+                """
+                 Preprocessing: If path has /post attached to it first than remove it, if path does't start 
+                 with '/' than append it as well.
+                """
                 self.set_request_path = self.request_path.replace("/post", "", 1)
-                if not os.path.exists(server.directory + self.request_path):
-                    try:
-                        os.makedirs(os.path.dirname(server.directory + self.request_path))
-                    except OSError as e:
-                        server.print_if_debugging_is_enabled(logger.DEBUG,
-                                                             "Can't create desired file at " +
-                                                             self.request_path
-                                                             + self.client_address)
+                if not self.request_path.startswith("/"):
+                    self.set_request_path = "/" + self.request_path
+
+                os.makedirs(os.path.dirname(server.directory + self.request_path), exist_ok=True)
 
                 if os.path.isdir(server.directory + self.request_path):
                     self.set_response_status = {"Bad Request": response_code.BAD_REQUEST}
@@ -281,7 +283,11 @@ class httpfs:
                 if self.request_body:
                     lock = LockFile(server.directory + self.request_path)
                     lock.acquire()
-                    file = open(server.directory + self.request_path, "w")
+                    mode = "w"
+                    if "Overwrite" in self.request_headers.keys() and self.request_headers["Overwrite"]:
+                        if self.request_headers["Overwrite"].lower() == "false":
+                            mode = "a"
+                    file = open(server.directory + self.request_path, mode)
                     file.write(self.request_body)
                     file.close()
                     lock.release()
@@ -305,13 +311,13 @@ class httpfs:
                                              response_code + " at time: "
                                              + date + " to client: " + self.client_address)
 
-        response_headers = "HTTP/1.0 " + response_code + " " + response_status + "\r\n" + \
-                           "Date: " + date + "\r\n" + \
-                           "Server: " + "COMP6461_LA1 (Unix)" + "\r\n" + \
-                           self.get_response_header_as_string + "\r\n"
+        response = "HTTP/1.0 " + response_code + " " + response_status + "\r\n" + \
+                   "Date: " + date + "\r\n" + \
+                   "Server: " + "COMP6461_LA1 (Unix)" + "\r\n" + \
+                   self.get_response_header_as_string + "\r\n" + \
+                   self.response_body
 
-        self.connection.sendall(response_headers.encode('utf-8'))
-        self.connection.sendall(self.response_body.encode('utf-8'))
+        self.connection.sendall(response.encode('utf-8'))
 
 
 class HTTPRequest(BaseHTTPRequestHandler):

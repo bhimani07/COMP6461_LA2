@@ -31,10 +31,15 @@ def create_fake_post_file_request():
     http_client = http(print_response_from_http_client)
 
     http_client.set_server = "localhost"
-    http_client.set_path = "COMP6461_LA1/input.json"
+    '''
+     Here path is wrong as it should always start with '/' but included this test case to test server for unauthorize
+     access and error handling testing
+    '''
+    http_client.set_path = "COMP6461_LA1/output.json"
     http_client.set_port = 8080
     http_client.set_request_headers = {"Host": http_client.server}
     http_client.set_request_headers = {"User-Agent": "Test"}
+    http_client.set_request_headers = {"Overwrite": "False"}
     http_client.set_request_type = "post"
 
     file = open("/Users/kishanbhimani/PycharmProjects/COMP6461_LA2/COMP6461_LA1/input.json", mode='r')
