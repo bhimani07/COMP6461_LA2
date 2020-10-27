@@ -1,10 +1,10 @@
-#   python3 httpc.py -h
-#   python3 httpc.py get -h
-#   python3 httpc.py post -h
-#   python3 httpc.py get -v 'http://httpbin.org/get?course=networking&assignment=1'
-#   python3 httpc.py post -v -header Content-Type:application/json -d '{"Name":"Kishan Bhimani", "School":"Concordia University"}' -o 'output.txt' 'http://httpbin.org/post'
-#   python3 httpc.py post -v -header Content-Type:application/json -f 'input.json' -o 'output.txt' 'http://httpbin.org/post'
-#   python3 httpc.py get -v 'http://google.com'
+# python3 httpc.py post -v -d "data to be posted" -p 8080 "http://localhost/hello.txt"
+# python3 httpc.py post -v -header Overwrite:false -d "data to be posted" -p 8080 "http://localhost/hello.txt"
+
+# python3 httpc.py get -v -p 8080 "http://localhost/hello"  (no such file)
+# python3 httpc.py get -v -p 8080 "http://localhost/../hello"  (Access Denied)
+# python3 httpc.py get -v -p 8080 "http://localhost/hello.txt"  (Will return Content-Disposition: attachment; filename=hello.txt)
+# python3 httpc.py get -v -p 8080 "http://localhost/bgcolor.py"  (Will return Content-Disposition: attachment; filename=bgcolor.py)
 
 import argparse
 import sys
@@ -64,10 +64,14 @@ class httpc:
     def user_agent(self):
         return self._user_agent
 
-    def print_response_from_http_client(self, output_to_console, output_to_file=None):
+    def print_response_from_http_client(self, output_to_console, output_to_file=None, output_file_name=None):
         print(output_to_console)
-        if output_to_file is not None:
-            if args.output:
+        if output_to_file:
+            if output_file_name:
+                file = open(output_file_name, "w")
+                file.write(output_to_file)
+                file.close()
+            elif args.output:
                 file = open(args.output, "w")
                 file.write(output_to_file)
                 file.close()

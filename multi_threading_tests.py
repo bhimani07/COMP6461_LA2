@@ -8,6 +8,7 @@ def create_fake_get_list_request():
 
     http_client.set_server = "localhost"
     http_client.set_path = "/"
+    http_client.set_verbosity = True
     http_client.set_port = 8080
     http_client.set_request_headers = {"Host": http_client.server}
     http_client.set_request_headers = {"User-Agent": "Test"}
@@ -19,6 +20,7 @@ def create_fake_get_file_content_request():
     http_client = http(print_response_from_http_client)
 
     http_client.set_server = "localhost"
+    http_client.set_verbosity = True
     http_client.set_path = "/bgcolor.py"
     http_client.set_port = 8080
     http_client.set_request_headers = {"Host": http_client.server}
@@ -37,6 +39,7 @@ def create_fake_post_file_request():
     '''
     http_client.set_path = "COMP6461_LA1/output.json"
     http_client.set_port = 8080
+    http_client.set_verbosity = True
     http_client.set_request_headers = {"Host": http_client.server}
     http_client.set_request_headers = {"User-Agent": "Test"}
     http_client.set_request_headers = {"Overwrite": "False"}
@@ -53,15 +56,19 @@ def create_fake_post_file_request():
     http_client.send_http_request()
 
 
-def print_response_from_http_client(output_to_console, output_to_file=None):
+def print_response_from_http_client(output_to_console, output_to_file=None, output_file_name=None):
     print(output_to_console)
+    '''
+       following code to support Content-Disposition header.
+    '''
+    if output_to_file:
+        if output_file_name:
+            file = open("COMP6461_LA1/" + output_file_name, "w")
+            file.write(output_to_file)
+            file.close()
 
 
 for i in range(0, 25):
     Thread(target=create_fake_get_list_request(), args=()).start()
-
-for i in range(0, 25):
     Thread(target=create_fake_get_file_content_request(), args=()).start()
-
-for i in range(0, 25):
     Thread(target=create_fake_post_file_request(), args=()).start()

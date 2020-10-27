@@ -36,13 +36,17 @@ class server:
     def __init__(self, debugging, port, directory):
         server.debugging = debugging
         server.port = port
-        server.directory = directory
+        server.directory = os.path.abspath(directory)
 
     def configure_and_start_server(self):
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             tcp_socket.bind(('localhost', server.port))
             tcp_socket.listen(10)
+            if server.debugging:
+                print(BgColor.color_green_wrapper("\n Server started on DEBUG mode"))
+            print(BgColor.color_green_wrapper("\n Server started at port: " + str(server.port)))
+            print(BgColor.color_green_wrapper(" Server's working directory set to: " + server.directory + "\n"))
         except socket.error:
             print("Socket Error : ", traceback.format_exc())
         while True:
@@ -252,6 +256,11 @@ class httpfs:
                         self.set_response_headers = {"Content-Type": mime_type[0]}
                         self.set_response_headers = {
                             "Content-Length": self.get_byte_length_of_object(self.response_body)}
+                        if mime_type[0] != "application/json":
+                            self.set_response_headers = {
+                                "Content-Disposition": "attachment; filename=" + os.path.basename(f.name)}
+                        else:
+                            self.set_response_headers = {"Content-Disposition": "inline"}
                 else:
                     self.set_response_status = {"Not Found": response_code.NOT_FOUND}
                     self.set_response_body = json.dumps({"message: ": "requested file does not exist or invalid path"})
@@ -348,7 +357,7 @@ parser.add_argument("-d",
                     dest="directory",
                     help="Specifies the directory that the server will use to read/write requested files. Default is "
                          "the current directory when launching the application.",
-                    default=os.getcwd())
+                    default="./")
 
 args = parser.parse_args()
 server_instance = server(args.debugging, args.port, args.directory)

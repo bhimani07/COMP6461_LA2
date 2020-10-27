@@ -1,3 +1,4 @@
+import re
 import socket
 import sys
 from http.client import HTTPResponse
@@ -188,7 +189,7 @@ class http:
         response_status_code = response_headers.status
 
         self.print_response_from_http_client(
-            BgColor.color_cyan_wrapper("\n" + "Response Status Code => " + str(response_status_code) + "\n"))
+            BgColor.color_cyan_wrapper("\n" + "Response Status Code => " + str(response_status_code)))
 
         # If response header suggests a redirect.
         if response_status_code in self.redirect_codes and self.redirect_counter < self.MAXIMUM_REDIRECT_LIMIT:
@@ -210,6 +211,20 @@ class http:
                     BgColor.color_red_wrapper("\n" + "Error Parsing Redirection Header: " + str(error)))
         else:
             self.redirect_counter = 0
+            '''
+                If Server sends response in-form of attachment then parse it and download it as a file.
+            '''
+            if response_headers.getheader("Content-Disposition") and response_headers.getheader(
+                    "Content-Disposition").startswith("attachment"):
+                filename = re.findall("filename=(.+)", response_headers.getheader("Content-Disposition"))[0]
+                if filename:
+                    output_file_name = filename
+                else:
+                    output_file_name = "attachment"
+                self.print_response_from_http_client(BgColor.color_yellow_wrapper(self.response_headers),
+                                                     self.response_data,
+                                                     output_file_name)
+                return
             self.display_results()
 
     def parse_headers(self, headers):
